@@ -26,6 +26,8 @@ Options:
   --listclients                  list the names of existing clients
   --removeclient [client name]   remove an existing client
   --showclientqr [client name]   show QR code for an existing client
+  --updatedomain [DNS name or IP] update the endpoint and existing client profiles; prompts if omitted
+  --updatedns [primary] [secondary] update existing client DNS; prompts if omitted
   --uninstall                    remove WireGuard and delete all configuration
   -y, --yes                      assume "yes" as answer to prompts when removing a client or removing WireGuard
   -h, --help                     show this help message and exit

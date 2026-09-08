@@ -178,6 +178,26 @@ parse_args() {
 				shift
 				shift
 				;;
+			--updatedomain)
+				update_domain=1
+				if [ -n "$2" ] && [[ "$2" != -* ]]; then
+					new_server_addr="$2"
+					shift
+				fi
+				shift
+				;;
+			--updatedns)
+				update_dns=1
+				if [ -n "$2" ] && [[ "$2" != -* ]]; then
+					new_dns1="$2"
+					shift
+				fi
+				if [ -n "$2" ] && [[ "$2" != -* ]]; then
+					new_dns2="$2"
+					shift
+				fi
+				shift
+				;;
 			--uninstall)
 				remove_wg=1
 				shift
@@ -222,6 +242,28 @@ parse_args() {
 }
 
 check_args() {
+	if [ "$update_dns" = 1 ]; then
+		if [ "$((auto + add_client + list_clients + remove_client + show_client_qr + remove_wg + update_domain))" -gt 0 ]; then
+			show_usage "Invalid parameters. '--updatedns' cannot be specified with other options."
+		fi
+		if [ ! -e "$WG_CONF" ]; then
+			exiterr "Cannot update client DNS because WireGuard has not been set up on this server."
+		fi
+		if { [ -n "$new_dns1" ] && ! check_ip "$new_dns1"; } || { [ -n "$new_dns2" ] && ! check_ip "$new_dns2"; }; then
+			exiterr "Invalid DNS server. Use an IPv4 address."
+		fi
+	fi
+	if [ "$update_domain" = 1 ]; then
+		if [ "$((auto + add_client + list_clients + remove_client + show_client_qr + remove_wg))" -gt 0 ]; then
+			show_usage "Invalid parameters. '--updatedomain' cannot be specified with other options."
+		fi
+		if [ ! -e "$WG_CONF" ]; then
+			exiterr "Cannot update the server address because WireGuard has not been set up on this server."
+		fi
+		if [ -n "$new_server_addr" ] && ! check_dns_name "$new_server_addr" && ! check_ip "$new_server_addr"; then
+			exiterr "Invalid server address. Must be a fully qualified domain name (FQDN) or an IPv4 address."
+		fi
+	fi
 	if [ "$auto" != 0 ] && [ -e "$WG_CONF" ]; then
 		show_usage "Invalid parameter '--auto'. WireGuard is already set up on this server."
 	fi
@@ -396,6 +438,8 @@ Options:
   --listclients                  list the names of existing clients
   --removeclient [client name]   remove an existing client
   --showclientqr [client name]   show QR code for an existing client
+  --updatedomain [DNS name or IP] update the endpoint and client profiles; prompts if omitted
+  --updatedns [primary] [secondary] update existing client DNS; prompts if omitted
   --uninstall                    remove WireGuard and delete all configuration
   -y, --yes                      assume "yes" as answer to prompts when removing a client or removing WireGuard
   -h, --help                     show this help message and exit
@@ -828,6 +872,109 @@ EOF
 	chmod 600 "$WG_CONF"
 }
 
+enter_new_server_address() {
+	echo
+	echo "Enter the new DNS name or IPv4 address for this VPN server:"
+	read -rp "Server address: " new_server_addr
+	until check_dns_name "$new_server_addr" || check_ip "$new_server_addr"; do
+		echo "Invalid server address. Enter a fully qualified domain name or an IPv4 address."
+		read -rp "Server address: " new_server_addr
+	done
+}
+
+backup_config_files() {
+	local backup_dir client_name wg_file backup_prefix="$1"
+	backup_dir="$PWD/$backup_prefix-backup-$(date +%Y%m%d-%H%M%S)"
+	if ! mkdir "$backup_dir"; then
+		exiterr "Cannot create backup directory $backup_dir. No endpoint files were changed."
+	fi
+	if ! cp -p "$WG_CONF" "$backup_dir/wg0.conf"; then
+		rm -rf "$backup_dir"
+		exiterr "Cannot back up $WG_CONF. No endpoint files were changed."
+	fi
+	get_export_dir
+	while read -r client_name; do
+		[ -z "$client_name" ] && continue
+		wg_file="$export_dir$client_name.conf"
+		if [ -f "$wg_file" ] && ! cp -p "$wg_file" "$backup_dir/$client_name.conf"; then
+			rm -rf "$backup_dir"
+			exiterr "Cannot back up $wg_file. No endpoint files were changed."
+		fi
+	done < <(grep '^# BEGIN_PEER' "$WG_CONF" | cut -d ' ' -f 3)
+	echo "Backup created: $backup_dir"
+}
+
+update_server_address() {
+	local port wg_file client_name updated=0 missing=0
+	[ -n "$new_server_addr" ] || enter_new_server_address
+	backup_config_files domain-update
+	port=$(grep '^ListenPort' "$WG_CONF" | awk '{print $3}')
+
+	# The endpoint comment is metadata used when generating client profiles.
+	sed -i "s|^# ENDPOINT .*|# ENDPOINT $new_server_addr|" "$WG_CONF"
+	get_export_dir
+	while read -r client_name; do
+		[ -z "$client_name" ] && continue
+		wg_file="$export_dir$client_name.conf"
+		if [ -f "$wg_file" ]; then
+			sed -i "s|^Endpoint = .*|Endpoint = $new_server_addr:$port|" "$wg_file"
+			updated=$((updated + 1))
+		else
+			echo "Warning: client profile not found: $wg_file" >&2
+			missing=$((missing + 1))
+		fi
+	done < <(grep '^# BEGIN_PEER' "$WG_CONF" | cut -d ' ' -f 3)
+
+	echo "Server endpoint updated to $new_server_addr:$port."
+	echo "$updated existing client profile(s) updated and ready to re-import."
+	[ "$missing" -gt 0 ] && echo "$missing client profile(s) were not found and must be updated manually." >&2
+}
+
+enter_new_client_dns() {
+	echo
+	echo "Enter the primary DNS server for VPN clients:"
+	read -rp "Primary DNS [1.1.1.1]: " new_dns1
+	[ -z "$new_dns1" ] && new_dns1=1.1.1.1
+	until check_ip "$new_dns1"; do
+		echo "Invalid DNS server. Use an IPv4 address."
+		read -rp "Primary DNS [1.1.1.1]: " new_dns1
+		[ -z "$new_dns1" ] && new_dns1=1.1.1.1
+	done
+	echo "Enter a secondary DNS server, or press Enter to skip:"
+	read -rp "Secondary DNS: " new_dns2
+	until [ -z "$new_dns2" ] || check_ip "$new_dns2"; do
+		echo "Invalid DNS server. Use an IPv4 address or press Enter to skip."
+		read -rp "Secondary DNS: " new_dns2
+	done
+}
+
+update_client_dns() {
+	local client_name wg_file dns_value updated=0 missing=0
+	[ -n "$new_dns1" ] || enter_new_client_dns
+	dns_value="$new_dns1"
+	[ -z "$new_dns2" ] || dns_value="$dns_value, $new_dns2"
+	backup_config_files dns-update
+	get_export_dir
+	while read -r client_name; do
+		[ -z "$client_name" ] && continue
+		wg_file="$export_dir$client_name.conf"
+		if [ -f "$wg_file" ]; then
+			if grep -q '^DNS = ' "$wg_file"; then
+				sed -i "s|^DNS = .*|DNS = $dns_value|" "$wg_file"
+			else
+				sed -i "/^\[Interface\]$/a DNS = $dns_value" "$wg_file"
+			fi
+			updated=$((updated + 1))
+		else
+			echo "Warning: client profile not found: $wg_file" >&2
+			missing=$((missing + 1))
+		fi
+	done < <(grep '^# BEGIN_PEER' "$WG_CONF" | cut -d ' ' -f 3)
+	echo "Client DNS updated to $dns_value."
+	echo "$updated existing client profile(s) updated and ready to re-import."
+	[ "$missing" -gt 0 ] && echo "$missing client profile(s) were not found and must be updated manually." >&2
+}
+
 create_firewall_rules() {
 	if systemctl is-active --quiet firewalld.service; then
 		# Using both permanent and not permanent rules to avoid a firewalld reload
@@ -1142,10 +1289,12 @@ select_menu_option() {
 	echo "   2) List existing clients"
 	echo "   3) Remove an existing client"
 	echo "   4) Show QR code for a client"
-	echo "   5) Remove WireGuard"
-	echo "   6) Exit"
+	echo "   5) Update server address"
+	echo "   6) Update client DNS"
+	echo "   7) Remove WireGuard"
+	echo "   8) Exit"
 	read -rp "Option: " option
-	until [[ "$option" =~ ^[1-6]$ ]]; do
+	until [[ "$option" =~ ^[1-8]$ ]]; do
 		echo "$option: invalid selection."
 		read -rp "Option: " option
 	done
@@ -1348,8 +1497,13 @@ list_clients=0
 remove_client=0
 show_client_qr=0
 remove_wg=0
+update_domain=0
+update_dns=0
 public_ip=""
 server_addr=""
+new_server_addr=""
+new_dns1=""
+new_dns2=""
 server_port=""
 first_client_name=""
 unsanitized_client=""
@@ -1360,6 +1514,18 @@ dns2=""
 
 parse_args "$@"
 check_args
+
+if [ "$update_domain" = 1 ]; then
+	show_header
+	update_server_address
+	exit 0
+fi
+
+if [ "$update_dns" = 1 ]; then
+	show_header
+	update_client_dns
+	exit 0
+fi
 
 if [ "$add_client" = 1 ]; then
 	show_header
@@ -1511,6 +1677,14 @@ else
 			exit 0
 		;;
 		5)
+			update_server_address
+			exit 0
+		;;
+		6)
+			update_client_dns
+			exit 0
+		;;
+		7)
 			confirm_remove_wg
 			if [[ "$remove" =~ ^[yY]$ ]]; then
 				print_remove_wg
@@ -1526,7 +1700,7 @@ else
 				exit 1
 			fi
 		;;
-		6)
+		8)
 			exit 0
 		;;
 	esac

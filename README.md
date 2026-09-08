@@ -1,200 +1,87 @@
-[English](README.md) | [简体中文](README-zh.md) | [繁體中文](README-zh-Hant.md) | [Русский](README-ru.md) | [Video en Español](https://www.youtube.com/watch?v=99qtaJU2E2k)
+# WireGuard Install Fork
 
-# WireGuard VPN Server Auto Setup Script
+A small fork of [hwdsl2/wireguard-install](https://github.com/hwdsl2/wireguard-install) for installing and managing a WireGuard VPN server.
 
-[![Build Status](https://github.com/hwdsl2/wireguard-install/actions/workflows/main.yml/badge.svg)](https://github.com/hwdsl2/wireguard-install/actions/workflows/main.yml) [![GitHub Stars](https://raw.githubusercontent.com/hwdsl2/badges/main/img/github-stars-wireguard-install.svg)](https://github.com/hwdsl2/wireguard-install/stargazers) [![License: MIT](docs/images/license.svg)](https://opensource.org/licenses/MIT)
+## Changes in this fork
 
-WireGuard VPN server installer for Ubuntu, Debian, AlmaLinux, Rocky Linux, CentOS, Fedora, openSUSE and Raspberry Pi OS.
+- Added an interactive **Update server address** option to the existing-install menu.
+- Added `--updatedomain [DNS name or IP]`.
+- Added interactive and command-line client DNS updates with `--updatedns`.
+- Updates existing client profiles to use the new endpoint without changing their keys or VPN addresses.
+- Creates a timestamped backup in the directory where the script is run before changing configuration files.
+- Supports updating older installations that use the original script’s configuration format.
 
-This script will let you set up your own VPN server in just a few minutes, even if you haven't used WireGuard before. [WireGuard](https://www.wireguard.com) is a fast and modern VPN designed with the goals of ease of use and high performance.
+## Download and install
 
-**Features:**
-
-- Fully automated WireGuard VPN server setup, no user input needed
-- Supports interactive install using custom options
-- Generates VPN profiles to auto-configure Windows, macOS, iOS and Android devices
-- Generates QR codes for easy mobile device setup
-- Supports managing WireGuard VPN users
-- Optimizes `sysctl` settings for improved VPN performance
-- Dual-stack IPv4 and IPv6 support for VPN clients
-
-**Also available:**
-
-- Docker VPN: [WireGuard](https://github.com/hwdsl2/docker-wireguard), [OpenVPN](https://github.com/hwdsl2/docker-openvpn), [IPsec VPN](https://github.com/hwdsl2/docker-ipsec-vpn-server), [Headscale](https://github.com/hwdsl2/docker-headscale)
-- AI: [Self-Hosted AI Stack](https://github.com/hwdsl2/self-hosted-ai-stack) for local LLMs, chat, RAG, voice and AI tools
-- 📚 Related reading: [Privacy Tools in the Age of AI](docs/vpn-book.md)
-
-> 📘 **New book:** [The Self-Hosted AI Builder’s Guide](https://books2read.com/aiguide?store=amazon). A practical guide to building, securing, and operating your own private AI stack.
-
-## Installation
-
-First, download the script on your Linux server\*:
+Download this fork on the VPN server:
 
 ```bash
-wget -O wireguard.sh https://get.vpnsetup.net/wg
+curl -fL -o wireguard.sh https://raw.githubusercontent.com/njinco/wireguard-install/master/wireguard-install.sh
+chmod +x wireguard.sh
 ```
 
-\* A cloud server, virtual private server (VPS) or dedicated server.
-
-**Option 1:** Auto install WireGuard using default options.
-
-```bash
-sudo bash wireguard.sh --auto
-```
-
-<details>
-<summary>
-See the script in action (terminal recording).
-</summary>
-
-**Note:** This recording is for demo purposes only.
-
-<p align="center"><img src="docs/images/demo1.svg"></p>
-</details>
-
-> [!TIP]
-> Optionally install [OpenVPN](https://github.com/hwdsl2/openvpn-install), [IPsec VPN](https://github.com/hwdsl2/setup-ipsec-vpn) and/or [Headscale](https://github.com/hwdsl2/headscale-install) on the same server.
-
-For servers with an external firewall (e.g. [EC2](https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/ec2-security-groups.html)/[GCE](https://cloud.google.com/firewall/docs/firewalls)), open UDP port 51820 for the VPN.
-
-**Option 2:** Interactive install using custom options.
+Install WireGuard:
 
 ```bash
 sudo bash wireguard.sh
 ```
 
-You can customize the following options: VPN server's DNS name, UDP port, DNS server for VPN clients and name of the first client.
+## Update an existing server address
 
-For servers with an external firewall, open your selected UDP port for the VPN.
+Run the script and select:
 
-<details>
-<summary>
-Click here if you are unable to download.
-</summary>
+```text
+5) Update server address
+```
 
-You may also use `curl` to download:
+Or use the command line. Omitting the address starts an interactive prompt:
 
 ```bash
-curl -fL -o wireguard.sh https://get.vpnsetup.net/wg
+sudo bash wireguard.sh --updatedomain
 ```
 
-Then follow the instructions above to install.
-
-Alternative setup URLs:
+You can also provide the address directly:
 
 ```bash
-https://github.com/hwdsl2/wireguard-install/raw/master/wireguard-install.sh
-https://gitlab.com/hwdsl2/wireguard-install/-/raw/master/wireguard-install.sh
+sudo bash wireguard.sh --updatedomain vpn.example.org
 ```
 
-If you are unable to download, open [wireguard-install.sh](wireguard-install.sh), then click the `Raw` button on the right. Press `Ctrl/Cmd+A` to select all, `Ctrl/Cmd+C` to copy, then paste into your favorite editor.
-</details>
-<details>
-<summary>
-Advanced: Auto install using custom options.
-</summary>
+Before updating, the script creates a backup such as:
 
-Advanced users can auto install WireGuard using custom options, by specifying command-line options when running the script. For more details, see the next section "view usage information for the WireGuard script".
+```text
+./domain-update-backup-YYYYMMDD-HHMMSS/
+```
 
-Alternatively, you may provide a Bash "here document" as input to the setup script. This method can also be used to provide input to manage users after install.
-
-First, install WireGuard interactively using custom options, and write down all your inputs to the script.
+Existing client `.conf` files are updated in place. Re-import them into WireGuard, or display an updated QR code with:
 
 ```bash
-sudo bash wireguard.sh
+sudo bash wireguard.sh --showclientqr client-name
 ```
 
-If you need to remove WireGuard, run the script again and select the appropriate option.
+Make sure the new DNS record points to the VPN server before updating the client profiles.
 
-Next, create the custom install command using your inputs. Example:
+## Update client DNS
+
+Run the script and select:
+
+```text
+6) Update client DNS
+```
+
+Or use the command line:
 
 ```bash
-sudo bash wireguard.sh <<ANSWERS
-n
-51820
-client
-2
-y
-ANSWERS
+sudo bash wireguard.sh --updatedns
+sudo bash wireguard.sh --updatedns 1.1.1.1 1.0.0.1
 ```
 
-**Note:** The install options may change in future versions of the script.
-</details>
-<details>
-<summary>
-View usage information for the WireGuard script.
-</summary>
+This updates existing client profiles and creates a `dns-update-backup-YYYYMMDD-HHMMSS` backup.
 
-```
-Usage: bash wireguard.sh [options]
+## License and credits
 
-Options:
+This fork is distributed under the MIT License. It retains the original copyright notices required by the license:
 
-  --addclient [client name]      add a new client
-  --dns1 [DNS server IP]         primary DNS server for new client (optional, default: Google Public DNS)
-  --dns2 [DNS server IP]         secondary DNS server for new client (optional)
-  --listclients                  list the names of existing clients
-  --removeclient [client name]   remove an existing client
-  --showclientqr [client name]   show QR code for an existing client
-  --uninstall                    remove WireGuard and delete all configuration
-  -y, --yes                      assume "yes" as answer to prompts when removing a client or removing WireGuard
-  -h, --help                     show this help message and exit
+- Lin Song, 2022–2026
+- Nyr, 2020–2023
 
-Install options (optional):
-
-  --auto                         auto install WireGuard using default or custom options
-  --serveraddr [DNS name or IP]  server address, must be a fully qualified domain name (FQDN) or an IPv4 address
-  --port [number]                port for WireGuard (1-65535, default: 51820)
-  --clientname [client name]     name for the first WireGuard client (default: client)
-  --dns1 [DNS server IP]         primary DNS server for first client (default: Google Public DNS)
-  --dns2 [DNS server IP]         secondary DNS server for first client
-
-To customize options, you may also run this script without arguments.
-```
-</details>
-
-## Community
-
-- 📬 [Get project updates and free deployment guides](https://selfhostedstack.beehiiv.com/subscribe?utm_campaign=vpn) (1–2 emails/month)
-- 💬 Join the [r/selfhostedstack](https://www.reddit.com/r/selfhostedstack/) community for discussions
-- ⭐ Star the repository if you find it useful — it helps others discover it
-
-## Next steps
-
-After setup, you can run the script again to manage users or uninstall WireGuard.
-
-Get your computer or device to use the VPN. Please refer to:
-
-**[Configure WireGuard VPN Clients](docs/clients.md)**
-
-**Read [:book: VPN book](docs/vpn-book.md) to access [extra content](https://ko-fi.com/post/Support-this-project-and-get-access-to-supporter-o-O5O7FVF8J).**
-
-Enjoy your very own VPN! :sparkles::tada::rocket::sparkles:
-
-## Credits
-
-This script is based on the great work of [Nyr and contributors](https://github.com/Nyr/wireguard-install), with enhancements and changes for compatibility with the [Setup IPsec VPN](https://github.com/hwdsl2/setup-ipsec-vpn) project.
-
-<details>
-<summary>
-List of enhancements over Nyr/wireguard-install.
-</summary>
-
-- Improved compatibility with Setup IPsec VPN
-- Improved script reliability, user input and output
-- Supports auto install using default or custom options
-- Supports using a DNS name as server address
-- Added support for openSUSE Linux
-- Supports listing existing VPN clients
-- Supports showing QR code for a client
-- Supports custom DNS server(s) for VPN clients
-- Supports command-line options for managing VPN clients
-- Optimizes `sysctl` settings for improved VPN performance
-- Improved creation of client config files when using `sudo`
-
-...and more!
-</details>
-
-## License
-
-MIT
+See [LICENSE.txt](LICENSE.txt) for the complete license text. The original project is available at [hwdsl2/wireguard-install](https://github.com/hwdsl2/wireguard-install).
